@@ -2,7 +2,7 @@ name: Update thumbnail gallery
 
 on:
   schedule:
-    - cron: "17 14 * * *"   # once per day, at :17
+    - cron: "17 */4 * * *"   # every 4 hours, at :17
   workflow_dispatch:          # lets you run it manually from the Actions tab
 
 permissions:
