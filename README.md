@@ -1,6 +1,6 @@
 # YouTube thumbnail gallery
 
-A GitHub Action checks the channel's RSS feed every 4 hours, adds new videos to `ids.txt`, records titles in `titles.json` (shown on hover), rebuilds `docs/index.html`, and commits the result. GitHub Pages serves that page.
+A GitHub Action checks the channel's RSS feed every day, adds new videos to `ids.txt`, records titles in `titles.json` (shown on hover), rebuilds `docs/index.html`, and commits the result. GitHub Pages serves that page.
 
 ## Setup (about 5 minutes)
 
