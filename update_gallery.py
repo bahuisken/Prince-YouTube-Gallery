@@ -172,7 +172,7 @@ def build_html(ids, titles):
     return f"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Thumbnails ({len(ids)})</title>
+<title>Prince YouTube Thumbnails ({len(ids)})</title>
 <style>
 body{{margin:0;padding:16px;background:#111;font-family:sans-serif;color:#eee}}
 .g{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}}
