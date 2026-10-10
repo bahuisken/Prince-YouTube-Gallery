@@ -23,6 +23,7 @@ import html
 import json
 import os
 import re
+import time
 import unicodedata
 import urllib.error
 import urllib.request
@@ -79,11 +80,28 @@ def write_titles(titles, ids):
         f.write("\n")
 
 
-def fetch_feed(url):
-    """Return [(video_id, title, is_short), ...] from an RSS feed, newest first."""
+def fetch_feed(url, attempts=4):
+    """Return [(video_id, title, is_short), ...] from an RSS feed, newest first.
+
+    YouTube's feed servers return the occasional 500/503, so retry with a growing pause.
+    """
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        root = ET.fromstring(resp.read())
+    for n in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                root = ET.fromstring(resp.read())
+            break
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or n == attempts:  # 4xx won't fix itself; give up after the last try
+                raise
+            err = e
+        except (urllib.error.URLError, TimeoutError, ET.ParseError) as e:
+            if n == attempts:
+                raise
+            err = e
+        wait = 5 * n
+        print(f"  feed error ({err}); retrying in {wait}s [{n}/{attempts - 1}]")
+        time.sleep(wait)
     found = []
     for entry in root.findall("a:entry", NS):
         vid = entry.findtext("yt:videoId", namespaces=NS)
@@ -249,11 +267,17 @@ def main():
     ids, shorts, titles = read_list(IDS_FILE), read_list(SHORTS_FILE), read_titles()
     original = (list(ids), list(shorts), dict(titles))
 
-    feed = fetch_feed(FEED_URL)
+    # If YouTube's feeds stay down, carry on with what we already have (and still rebuild
+    # the pages) instead of failing; the next scheduled run will pick up anything new.
+    try:
+        feed = fetch_feed(FEED_URL)
+    except Exception as e:
+        print(f"WARNING: could not read the channel feed ({e}); no new videos this run.")
+        feed = []
     try:
         shorts_feed = fetch_feed(SHORTS_FEED_URL)
-    except Exception as e:  # the Shorts playlist feed is a bonus; never fail the run over it
-        print(f"Note: could not read the Shorts feed ({e}); using /shorts/ links only.")
+    except Exception as e:
+        print(f"Note: could not read the Shorts feed ({e}).")
         shorts_feed = []
 
     # A video is a Short if the main feed links it as /shorts/ or the Shorts feed lists it.
