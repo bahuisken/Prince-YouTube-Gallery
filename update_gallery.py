@@ -1,60 +1,68 @@
 #!/usr/bin/env python3
 """
-Keep a YouTube thumbnail gallery current.
+Keep a YouTube thumbnail gallery current, with Videos and Shorts on separate pages.
 
-1. Reads known video IDs from ids.txt (newest first) and titles from titles.json.
-2. Fetches the channel's RSS feed, adds any new videos, and refreshes titles
-   for the videos in the feed.
-3. Looks up titles for any video that still has none (YouTube oEmbed, no API key).
-4. Regenerates docs/index.html (served by GitHub Pages). Titles show on hover.
+1. Reads known IDs from ids.txt (videos) and shorts.txt (Shorts), titles from titles.json.
+2. Fetches the channel's RSS feed (and the channel's Shorts feed), files new items
+   under Videos or Shorts, and refreshes titles.
+3. Moves any video in ids.txt that is also in shorts.txt over to the Shorts list.
+4. Looks up titles for anything that still has none (YouTube oEmbed, no API key).
+5. Regenerates docs/index.html (Videos) and docs/shorts/index.html (Shorts).
 
 Optional:
     --prune   Remove IDs whose video has been deleted (oEmbed returns 404).
-    --force   Rebuild docs/index.html even if nothing changed (e.g. after editing the template).
+    --force   Rebuild the pages even if nothing changed (e.g. after editing the template).
 
 Settings (environment variables, all optional):
     CHANNEL_ID    The channel's UC... ID (overrides the default below).
-    SKIP_SHORTS   "1" to ignore Shorts found in the feed (default: include them).
-    FEED_URL      Override the feed URL (used for testing).
+    PAGE_TITLE    Browser-tab title (overrides the default below).
+    FEED_URL / SHORTS_FEED_URL   Override the feed URLs (used for testing).
 """
 import argparse
 import html
 import json
 import os
 import re
-import sys
 import unicodedata
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
-# The CHANNEL_ID env var (if set) overrides the default below.
+# Environment variables (if set) override the defaults below.
 CHANNEL_ID = os.environ.get("CHANNEL_ID") or "UCv3mNSNjuWldihk1DUdnGtw"
-SKIP_SHORTS = os.environ.get("SKIP_SHORTS", "0") == "1"
+PAGE_TITLE = os.environ.get("PAGE_TITLE") or "Thumbnails"
+
 FEED_URL = os.environ.get(
     "FEED_URL",
     f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}",
 )
+# YouTube keeps an automatic "Shorts only" playlist: UC... -> UUSH...
+SHORTS_FEED_URL = os.environ.get(
+    "SHORTS_FEED_URL",
+    f"https://www.youtube.com/feeds/videos.xml?playlist_id=UUSH{CHANNEL_ID[2:]}",
+)
 
 IDS_FILE = "ids.txt"
+SHORTS_FILE = "shorts.txt"
 TITLES_FILE = "titles.json"
-OUT_FILE = os.path.join("docs", "index.html")
+VIDEOS_PAGE = os.path.join("docs", "index.html")
+SHORTS_PAGE = os.path.join("docs", "shorts", "index.html")
 NS = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
 UA = {"User-Agent": "Mozilla/5.0"}
 OEMBED = "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={id}&format=json"
 
 
-def read_ids():
-    if not os.path.exists(IDS_FILE):
+def read_list(path):
+    if not os.path.exists(path):
         return []
-    with open(IDS_FILE) as f:
+    with open(path) as f:
         return list(dict.fromkeys(l.strip() for l in f if l.strip()))
 
 
-def write_ids(ids):
-    with open(IDS_FILE, "w") as f:
-        f.write("\n".join(ids) + "\n")
+def write_list(path, items):
+    with open(path, "w") as f:
+        f.write("\n".join(items) + ("\n" if items else ""))
 
 
 def read_titles():
@@ -71,9 +79,9 @@ def write_titles(titles, ids):
         f.write("\n")
 
 
-def fetch_feed():
-    """Return [(video_id, title), ...] from the RSS feed, newest first."""
-    req = urllib.request.Request(FEED_URL, headers=UA)
+def fetch_feed(url):
+    """Return [(video_id, title, is_short), ...] from an RSS feed, newest first."""
+    req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=30) as resp:
         root = ET.fromstring(resp.read())
     found = []
@@ -81,11 +89,9 @@ def fetch_feed():
         vid = entry.findtext("yt:videoId", namespaces=NS)
         if not vid:
             continue
-        if SKIP_SHORTS:
-            link = entry.find("a:link", NS)
-            if link is not None and "/shorts/" in link.get("href", ""):
-                continue
-        found.append((vid, (entry.findtext("a:title", namespaces=NS) or "").strip()))
+        link = entry.find("a:link", NS)
+        is_short = link is not None and "/shorts/" in link.get("href", "")
+        found.append((vid, (entry.findtext("a:title", namespaces=NS) or "").strip(), is_short))
     return found
 
 
@@ -151,8 +157,16 @@ def download_names(ids, titles):
     return names
 
 
-def build_html(ids, titles):
+def build_html(ids, titles, shorts_page=False):
     files = download_names(ids, titles)
+    if shorts_page:
+        page_title = f"{PAGE_TITLE} - Shorts"
+        nav = '<a href="../">&larr; Videos</a>'
+        fit = "contain"  # Shorts are vertical; don't crop them
+    else:
+        page_title = PAGE_TITLE
+        nav = '<a href="shorts/">Shorts &rarr;</a>'
+        fit = "cover"
 
     def card(i):
         name = html.escape(i)
@@ -172,15 +186,19 @@ def build_html(ids, titles):
     return f"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Prince YouTube Thumbnails ({len(ids)})</title>
+<title>{html.escape(page_title)}</title>
 <style>
 body{{margin:0;padding:16px;background:#111;font-family:sans-serif;color:#eee}}
+nav{{text-align:right;margin-bottom:12px}}
+nav a{{color:#8ab4f8;text-decoration:none;font-size:15px}}
+nav a:hover{{text-decoration:underline}}
 .g{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}}
 figure{{margin:0}}
-img{{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:#222;display:block}}
+img{{width:100%;aspect-ratio:16/9;object-fit:{fit};border-radius:6px;background:#222;display:block}}
 .dl{{display:block;margin-top:6px;font-size:13px;color:#8ab4f8;text-decoration:none}}
 .dl:hover{{text-decoration:underline}}
 </style>
+<nav>{nav}</nav>
 <div class="g">
 {cards}
 </div>
@@ -216,49 +234,80 @@ document.addEventListener('click',async e=>{{
 """
 
 
+def write_page(path, content):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prune", action="store_true", help="remove deleted videos")
-    ap.add_argument("--force", action="store_true", help="rebuild the page even if nothing changed")
+    ap.add_argument("--force", action="store_true", help="rebuild the pages even if nothing changed")
     args = ap.parse_args()
 
-    ids = read_ids()
-    titles = read_titles()
-    original_ids, original_titles = list(ids), dict(titles)
-    known = set(ids)
+    ids, shorts, titles = read_list(IDS_FILE), read_list(SHORTS_FILE), read_titles()
+    original = (list(ids), list(shorts), dict(titles))
 
-    feed = fetch_feed()
-    new = [v for v, _ in feed if v not in known]
-    if new:
-        print(f"{len(new)} new video(s): {', '.join(new)}")
-        ids = new + ids  # feed is newest first
-    else:
-        print("No new videos.")
-    for vid, title in feed:
+    feed = fetch_feed(FEED_URL)
+    try:
+        shorts_feed = fetch_feed(SHORTS_FEED_URL)
+    except Exception as e:  # the Shorts playlist feed is a bonus; never fail the run over it
+        print(f"Note: could not read the Shorts feed ({e}); using /shorts/ links only.")
+        shorts_feed = []
+
+    # A video is a Short if the main feed links it as /shorts/ or the Shorts feed lists it.
+    feed_shorts = list(dict.fromkeys(
+        [v for v, _, s in feed if s] + [v for v, _, _ in shorts_feed]
+    ))
+    feed_short_set = set(feed_shorts)
+
+    # Shorts we haven't filed yet (including any that earlier landed in ids.txt)
+    new_shorts = [v for v in feed_shorts if v not in set(shorts)]
+    # Videos we haven't seen anywhere
+    seen = set(ids) | set(shorts) | feed_short_set
+    new_videos = list(dict.fromkeys(v for v, _, _ in feed if v not in seen))
+
+    if new_videos:
+        print(f"{len(new_videos)} new video(s): {', '.join(new_videos)}")
+    if new_shorts:
+        print(f"{len(new_shorts)} new short(s): {', '.join(new_shorts)}")
+    if not (new_videos or new_shorts):
+        print("No new videos or shorts.")
+
+    shorts = new_shorts + shorts
+    short_set = set(shorts)
+    moved = [i for i in ids if i in short_set]
+    if moved:
+        print(f"Moving {len(moved)} item(s) from Videos to Shorts.")
+    ids = new_videos + [i for i in ids if i not in short_set]
+
+    for vid, title, _ in feed + shorts_feed:
         if title:
             titles[vid] = title  # the feed has the current title
 
-    fill_missing_titles(ids, titles)
+    fill_missing_titles(ids + shorts, titles)
 
     if args.prune:
-        before = len(ids)
-        ids = prune(ids)
-        print(f"Pruned {before - len(ids)} video(s).")
+        before = len(ids) + len(shorts)
+        ids, shorts = prune(ids), prune(shorts)
+        print(f"Pruned {before - len(ids) - len(shorts)} video(s).")
 
-    titles = {i: titles[i] for i in ids if titles.get(i)}
+    keep = set(ids) | set(shorts)
+    titles = {i: t for i, t in titles.items() if i in keep and t}
 
     # Skip writing when nothing changed so the workflow doesn't commit every run.
-    if (ids == original_ids and titles == original_titles
-            and os.path.exists(OUT_FILE) and not args.force):
-        print(f"Gallery unchanged ({len(ids)} thumbnails).")
+    if ((ids, shorts, titles) == original
+            and os.path.exists(VIDEOS_PAGE) and os.path.exists(SHORTS_PAGE) and not args.force):
+        print(f"Gallery unchanged ({len(ids)} videos, {len(shorts)} shorts).")
         return
 
-    write_ids(ids)
-    write_titles(titles, ids)
-    os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
-    with open(OUT_FILE, "w", encoding="utf-8") as f:
-        f.write(build_html(ids, titles))
-    print(f"Gallery has {len(ids)} thumbnails, {len(titles)} with titles.")
+    write_list(IDS_FILE, ids)
+    write_list(SHORTS_FILE, shorts)
+    write_titles(titles, ids + shorts)
+    write_page(VIDEOS_PAGE, build_html(ids, titles))
+    write_page(SHORTS_PAGE, build_html(shorts, titles, shorts_page=True))
+    print(f"Gallery has {len(ids)} videos and {len(shorts)} shorts.")
 
 
 if __name__ == "__main__":

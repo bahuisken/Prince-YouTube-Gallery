@@ -1,6 +1,6 @@
 # YouTube thumbnail gallery
 
-A GitHub Action checks the channel's RSS feed every day, adds new videos to `ids.txt`, records titles in `titles.json` (shown on hover), rebuilds `docs/index.html`, and commits the result. GitHub Pages serves that page.
+A GitHub Action checks the channel's RSS feed every 4 hours, adds new videos to `ids.txt` and Shorts to `shorts.txt`, records titles in `titles.json` (shown on hover), and rebuilds the pages: `docs/index.html` (Videos) and `docs/shorts/index.html` (Shorts, linked from the main page). It commits the result and GitHub Pages serves it.
 
 ## Setup (about 5 minutes)
 
@@ -18,6 +18,22 @@ Your gallery will be at `https://<your-username>.github.io/<repo-name>/`.
 - `ids.txt` is newest first. New videos are added to the top.
 - The RSS feed only lists the 15 most recent uploads, so the job relies on `ids.txt` for everything older. Don't delete it.
 - On Sundays (UTC) the job also removes videos that return a 404 from YouTube. Network errors never remove anything.
-- Set `SKIP_SHORTS: "1"` in the workflow to leave Shorts out.
+- Shorts are detected from the feed (a `/shorts/` link, or the channel's automatic Shorts playlist `UUSH...`) and go on the Shorts page. Anything listed in `shorts.txt` is removed from the Videos page automatically.
+- The browser-tab title is `PAGE_TITLE` near the top of `update_gallery.py` (the Shorts page adds " - Shorts"). You can also set a repository variable named `PAGE_TITLE` to override it.
 - GitHub pauses scheduled workflows in a repo with no activity for 60 days. If that happens, re-enable it in the Actions tab.
 - Run locally: `CHANNEL_ID=UC... python3 update_gallery.py` (add `--prune` to check for deleted videos).
+
+## Backfilling all Shorts (one time)
+
+The RSS feed only lists the 15 newest uploads, so older Shorts need a one-time import. On your computer:
+
+```
+git pull --rebase
+pip install yt-dlp
+yt-dlp --flat-playlist --print id "https://www.youtube.com/channel/UCv3mNSNjuWldihk1DUdnGtw/shorts" > shorts.txt
+git add shorts.txt
+git commit -m "Backfill Shorts"
+git push
+```
+
+Then run **Actions -> Update thumbnail gallery -> Run workflow**. The job moves any of those IDs out of `ids.txt`, looks up their titles, and builds the Shorts page.

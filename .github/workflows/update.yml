@@ -2,7 +2,7 @@ name: Update thumbnail gallery
 
 on:
   schedule:
-    - cron: "17 14 * * *"   # once per day, at :17
+    - cron: "17 */4 * * *"   # every 4 hours, at :17
   workflow_dispatch:          # lets you run it manually from the Actions tab
 
 permissions:
@@ -21,7 +21,7 @@ jobs:
       - name: Update gallery
         env:
           CHANNEL_ID: ${{ vars.CHANNEL_ID }}
-          # SKIP_SHORTS: "1"   # uncomment to ignore Shorts
+          PAGE_TITLE: ${{ vars.PAGE_TITLE }}
         run: |
           # On Sundays (UTC) also drop videos that have been deleted.
           ARGS=""
@@ -34,7 +34,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ids.txt titles.json docs/index.html
+          git add ids.txt shorts.txt titles.json docs
           if git diff --cached --quiet; then
             echo "Nothing to commit."
           else
