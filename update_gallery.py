@@ -181,10 +181,12 @@ def build_html(ids, titles, shorts_page=False):
         page_title = f"{PAGE_TITLE} - Shorts"
         nav = '<a href="../">&larr; Videos</a>'
         fit = "contain"  # Shorts are vertical; don't crop them
+        player = "v"     # tall 9:16 popup
     else:
         page_title = PAGE_TITLE
         nav = '<a href="shorts/">Shorts &rarr;</a>'
         fit = "cover"
+        player = "h"     # wide 16:9 popup
 
     def card(i):
         name = html.escape(i)
@@ -192,7 +194,7 @@ def build_html(ids, titles, shorts_page=False):
         tip_attr = f' title="{tip}"' if tip else ""
         return (
             f'<figure>'
-            f'<a href="https://www.youtube.com/watch?v={name}" target="_blank" rel="noopener"{tip_attr}>'
+            f'<a class="play" data-id="{name}" data-title="{tip}" href="https://www.youtube.com/watch?v={name}" target="_blank" rel="noopener"{tip_attr}>'
             f'<img loading="lazy" src="https://i.ytimg.com/vi/{name}/maxresdefault.jpg" '
             f'onload="fb(this,true)" onerror="fb(this,false)" alt="{tip or name}"></a>'
             f'<a class="dl" data-name="{html.escape(files[i], quote=True)}" '
@@ -215,10 +217,28 @@ figure{{margin:0}}
 img{{width:100%;aspect-ratio:16/9;object-fit:{fit};border-radius:6px;background:#222;display:block}}
 .dl{{display:block;margin-top:6px;font-size:13px;color:#8ab4f8;text-decoration:none}}
 .dl:hover{{text-decoration:underline}}
+.play{{cursor:pointer}}
+#pop{{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;
+  flex-direction:column;gap:10px;background:rgba(0,0,0,.85);padding:16px;box-sizing:border-box}}
+#pop.on{{display:flex}}
+#box{{position:relative;background:#000;border-radius:8px;overflow:hidden;max-width:100%}}
+#pop.h #box{{width:min(94vw,1100px,calc(78vh*16/9));aspect-ratio:16/9}}
+#pop.v #box{{height:min(78vh,760px);aspect-ratio:9/16}}
+#box iframe{{position:absolute;inset:0;width:100%;height:100%;border:0}}
+#bar{{display:flex;gap:16px;align-items:center;max-width:min(94vw,1100px);font-size:14px}}
+#ptitle{{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}}
+#bar a{{color:#8ab4f8;text-decoration:none;white-space:nowrap}}
+#bar a:hover{{text-decoration:underline}}
+#x{{position:absolute;top:10px;right:14px;background:none;border:0;color:#fff;font-size:34px;line-height:1;cursor:pointer}}
 </style>
 <nav>{nav}</nav>
 <div class="g">
 {cards}
+</div>
+<div id="pop" class="{player}" role="dialog" aria-modal="true" aria-label="Video player">
+  <button id="x" aria-label="Close">&times;</button>
+  <div id="box"></div>
+  <div id="bar"><span id="ptitle"></span><a id="yt" target="_blank" rel="noopener">Watch on YouTube</a></div>
 </div>
 <script>
 function fb(i,ok){{
@@ -231,6 +251,27 @@ function fb(i,ok){{
   }}
 }}
 document.querySelectorAll('img').forEach(i=>{{ if(i.complete) fb(i,i.naturalWidth>0); }});
+
+// Click a thumbnail -> play it in a popup. The player is created on click and removed on close,
+// so nothing loads until someone asks for it, and closing stops playback.
+const pop=document.getElementById('pop'), box=document.getElementById('box');
+function openPlayer(a){{
+  const id=a.dataset.id;
+  box.innerHTML='<iframe src="https://www.youtube-nocookie.com/embed/'+id+'?autoplay=1&rel=0&playsinline=1" '+
+    'allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
+  document.getElementById('ptitle').textContent=a.dataset.title||'';
+  document.getElementById('yt').href='https://www.youtube.com/watch?v='+id;
+  pop.classList.add('on');
+}}
+function closePlayer(){{ pop.classList.remove('on'); box.innerHTML=''; }}
+pop.addEventListener('click',e=>{{ if(e.target===pop||e.target.id==='x') closePlayer(); }});
+document.addEventListener('keydown',e=>{{ if(e.key==='Escape') closePlayer(); }});
+document.addEventListener('click',e=>{{
+  const a=e.target.closest('.play');
+  if(!a || e.metaKey || e.ctrlKey || e.shiftKey) return;  // ctrl/cmd-click still opens YouTube in a new tab
+  e.preventDefault();
+  openPlayer(a);
+}});
 
 // Try a real download; if the browser blocks the cross-site fetch, open the image in a new tab.
 document.addEventListener('click',async e=>{{
