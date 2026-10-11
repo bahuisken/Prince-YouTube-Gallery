@@ -15,7 +15,7 @@ Optional:
 
 Settings (environment variables, all optional):
     CHANNEL_ID    The channel's UC... ID (overrides the default below).
-    PAGE_TITLE    Browser-tab title (overrides the default below).
+    PAGE_TITLE / SHORTS_PAGE_TITLE   Browser-tab titles (override the defaults below).
     FEED_URL / SHORTS_FEED_URL   Override the feed URLs (used for testing).
 """
 import argparse
@@ -32,7 +32,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Environment variables (if set) override the defaults below.
 CHANNEL_ID = os.environ.get("CHANNEL_ID") or "UCv3mNSNjuWldihk1DUdnGtw"
-PAGE_TITLE = os.environ.get("PAGE_TITLE") or "Thumbnails"
+PAGE_TITLE = os.environ.get("PAGE_TITLE") or "Prince YouTube Gallery"
+SHORTS_PAGE_TITLE = os.environ.get("SHORTS_PAGE_TITLE") or "Prince YouTube Shorts Gallery"
+# Browser-tab icon (also used as the home-screen icon on phones).
+# If docs/favicon.jpg exists in this repo it is used (self-hosted); otherwise this URL is.
+FAVICON_URL = os.environ.get("FAVICON_URL") or "https://princesongs.org/wp-content/uploads/2017/06/cropped-dmsr-180x180.jpg"
+FAVICON_FILE = os.path.join("docs", "favicon.jpg")
 
 FEED_URL = os.environ.get(
     "FEED_URL",
@@ -178,7 +183,7 @@ def download_names(ids, titles):
 def build_html(ids, titles, shorts_page=False):
     files = download_names(ids, titles)
     if shorts_page:
-        page_title = f"{PAGE_TITLE} - Shorts"
+        page_title = SHORTS_PAGE_TITLE
         nav = '<a href="../">&larr; Videos</a>'
         fit = "contain"  # Shorts are vertical; don't crop them
         player = "v"     # tall 9:16 popup
@@ -187,6 +192,12 @@ def build_html(ids, titles, shorts_page=False):
         nav = '<a href="shorts/">Shorts &rarr;</a>'
         fit = "cover"
         player = "h"     # wide 16:9 popup
+
+    if os.path.exists(FAVICON_FILE):
+        icon = "../favicon.jpg" if shorts_page else "favicon.jpg"  # Shorts page is one folder deeper
+    else:
+        icon = FAVICON_URL
+    icon = html.escape(icon, quote=True)
 
     def card(i):
         name = html.escape(i)
@@ -207,6 +218,8 @@ def build_html(ids, titles, shorts_page=False):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(page_title)}</title>
+<link rel="icon" type="image/jpeg" href="{icon}">
+<link rel="apple-touch-icon" href="{icon}">
 <style>
 body{{margin:0;padding:16px;background:#111;font-family:sans-serif;color:#eee}}
 nav{{text-align:right;margin-bottom:12px}}
